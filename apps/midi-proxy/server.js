@@ -3,40 +3,66 @@ const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const cheerio = require('cheerio');
-const AbortController = require('abort-controller');
 
+// Safe AbortController for Node 18
+let AbortController = global.AbortController;
+try {
+  if (!AbortController) {
+    AbortController = require('abort-controller');
+  }
+} catch (_) {
+  // last resort: dummy that never aborts (won't crash)
+  AbortController = class { constructor(){ this.signal = undefined; } };
+}
 
 const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 
-// --- API: /getMidi?url=<MIDI_URL> ---
-app.get('/getMidi', async (req, res) => {
+const path = require('path');
+const express = require('express');
+const cors = require('cors');
+const fetch = require('node-fetch');          // v2
+const cheerio = require('cheerio');
+
+// Safe AbortController for Node 18
+let AbortController = global.AbortController;
+try {
+  if (!AbortController) {
+    AbortController = require('abort-controller'); // npm i abort-controller
+  }
+} catch (_) {
+  // last resort: dummy that never aborts (won't crash)
+  AbortController = class { constructor(){ this.signal = undefined; } };
+}
+
+pp.get('/getMidi', async (req, res) => {
   const midiUrl = req.query.url;
   if (!midiUrl) return res.status(400).send("Missing 'url' parameter");
 
-  try {
-    // basic validation: must be http(s)
-    let u;
-    try { u = new URL(midiUrl); } catch { return res.status(400).send("Bad 'url'"); }
-    if (!/^https?:$/.test(u.protocol)) return res.status(400).send("Only http(s) URLs allowed");
+  // Validate URL & scheme
+  let u;
+  try { u = new URL(midiUrl); } catch { return res.status(400).send("Bad 'url'"); }
+  if (!/^https?:$/.test(u.protocol)) return res.status(400).send("Only http(s) URLs allowed");
 
-    // polite headers + 15s timeout
+  try {
     const controller = new AbortController();
-    const to = setTimeout(() => controller.abort(), 15000);
+    const to = setTimeout(() => {
+      try { controller.abort(); } catch (_) {}
+    }, 15000);
+
     const r = await fetch(midiUrl, {
       redirect: 'follow',
       signal: controller.signal,
       headers: {
         'User-Agent': 'awertt-midi-proxy/1.0 (+https://awertt.org)'
       }
-    }).catch(err => { throw err; });
+    });
+
     clearTimeout(to);
 
     if (!r.ok) {
-      return res
-        .status(502)
-        .send(`Fetch failed: ${r.status} ${r.statusText}`);
+      return res.status(502).send(`Fetch failed: ${r.status} ${r.statusText}`);
     }
 
     const buf = Buffer.from(await r.arrayBuffer());
@@ -44,76 +70,6 @@ app.get('/getMidi', async (req, res) => {
   } catch (err) {
     console.error('getMidi error:', err && err.message ? err.message : err);
     res.status(500).send('Error fetching MIDI: ' + (err && err.message ? err.message : String(err)));
-  }
-});
-
-// --- BitMidi search → list of { title, pageUrl, downloadUrl, kb } ---
-app.get('/bitmidi/search', async (req, res) => {
-  const q = (req.query.q || '').trim();
-  const limit = Math.min(parseInt(req.query.limit || '10', 10) || 10, 25);
-  if (!q) return res.status(400).json({ error: "Missing 'q' parameter" });
-
-  const UA = 'awertt-midi-proxy/1.0 (+https://awertt.org) Node-fetch';
-  const fetchOpts = { headers: { 'User-Agent': UA }, redirect: 'follow' };
-
-  try {
-    // 1) search page
-    const searchUrl = `https://bitmidi.com/search?q=${encodeURIComponent(q)}`;
-    const sr = await fetch(searchUrl, fetchOpts);
-    if (!sr.ok) return res.status(502).json({ error: `Search failed: ${sr.status}` });
-    const $ = cheerio.load(await sr.text());
-
-    // 2) collect candidate result page links
-    const pageHrefs = new Set();
-    $('a[href]').each((_, a) => {
-      const href = $(a).attr('href');
-      if (!href) return;
-      if (/\/[a-z0-9-]+-mid$/i.test(href)) {
-        pageHrefs.add(new URL(href, 'https://bitmidi.com').toString());
-      }
-    });
-
-    const pages = Array.from(pageHrefs).slice(0, limit);
-
-    // 3) visit each result page to extract the .mid link
-    const results = [];
-    for (const pageUrl of pages) {
-      try {
-        const pr = await fetch(pageUrl, fetchOpts);
-        if (!pr.ok) continue;
-        const $$ = cheerio.load(await pr.text());
-
-        let downloadUrl = null;
-        let title = ($$('h1').first().text() || $$('title').first().text() || '').trim();
-
-        $$('a[href$=".mid"], a[href*=".mid"]').each((_, a) => {
-          const href = $$(a).attr('href');
-          if (href && /\.mid(\?.*)?$/i.test(href)) {
-            downloadUrl = new URL(href, 'https://bitmidi.com').toString();
-            return false;
-          }
-        });
-
-        let kb = null;
-        const sizeText = $$('body').text();
-        const m = sizeText.match(/([0-9]+(?:\.[0-9]+)?)\s*(KB|MB)\b/i);
-        if (m) {
-          const val = parseFloat(m[1]);
-          kb = /MB/i.test(m[2]) ? Math.round(val * 1024) : Math.round(val);
-        }
-
-        if (downloadUrl) {
-          results.push({ title, pageUrl, downloadUrl, kb });
-        }
-      } catch (err) {
-        console.error(`Error parsing page ${pageUrl}:`, err.message);
-      }
-    }
-
-    res.json({ query: q, count: results.length, results });
-  } catch (err) {
-    console.error('BitMidi search error:', err.message);
-    res.status(500).json({ error: err?.message || String(err) });
   }
 });
 
