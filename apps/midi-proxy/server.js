@@ -3,7 +3,7 @@
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');           // v2.x (require-compatible)
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const cheerio = require('cheerio');
 
 // AbortController polyfill for Node 18
