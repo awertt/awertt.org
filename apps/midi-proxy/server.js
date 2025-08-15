@@ -3,7 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const cheerio = require('cheerio');
-const AbortController = fetch.AbortController; // Node 18 safe
+const AbortController = require('abort-controller');
+
 
 const app = express();
 app.set('trust proxy', true);
@@ -15,17 +16,33 @@ app.get('/getMidi', async (req, res) => {
   if (!midiUrl) return res.status(400).send("Missing 'url' parameter");
 
   try {
+    // basic validation: must be http(s)
+    let u;
+    try { u = new URL(midiUrl); } catch { return res.status(400).send("Bad 'url'"); }
+    if (!/^https?:$/.test(u.protocol)) return res.status(400).send("Only http(s) URLs allowed");
+
+    // polite headers + 15s timeout
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 15000);
+    const to = setTimeout(() => controller.abort(), 15000);
+    const r = await fetch(midiUrl, {
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'awertt-midi-proxy/1.0 (+https://awertt.org)'
+      }
+    }).catch(err => { throw err; });
+    clearTimeout(to);
 
-    const r = await fetch(midiUrl, { redirect: 'follow', signal: controller.signal });
-    clearTimeout(t);
-
-    if (!r.ok) return res.status(502).send(`Fetch failed: ${r.status} ${r.statusText}`);
+    if (!r.ok) {
+      return res
+        .status(502)
+        .send(`Fetch failed: ${r.status} ${r.statusText}`);
+    }
 
     const buf = Buffer.from(await r.arrayBuffer());
     res.type('text/plain; charset=utf-8').send(buf.toString('hex'));
   } catch (err) {
+    console.error('getMidi error:', err && err.message ? err.message : err);
     res.status(500).send('Error fetching MIDI: ' + (err && err.message ? err.message : String(err)));
   }
 });
