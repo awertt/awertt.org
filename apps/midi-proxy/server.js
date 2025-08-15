@@ -54,63 +54,157 @@ app.get('/getMidi', async (req, res) => {
 // ---------- /bitmidi/search ----------
 app.get('/bitmidi/search', async (req, res) => {
   const q = (req.query.q || '').trim();
-  const limit = Math.min(parseInt(req.query.limit || '10', 10) || 10, 25);
   if (!q) return res.status(400).json({ error: "Missing 'q' parameter" });
 
-  const fetchOpts = {
-    headers: { 'User-Agent': 'awertt-midi-proxy/1.0 (+https://awertt.org)', 'Accept': 'text/html,*/*' },
-    redirect: 'follow'
+  // Tunables (overridable via querystring)
+  const maxPages    = Math.min(parseInt(req.query.maxPages   || '50', 10) || 50, 200);    // how many paginated search pages at most
+  const maxResults  = Math.min(parseInt(req.query.maxResults || '2000',10) || 2000, 10000);
+  const concurrency = Math.min(parseInt(req.query.concurrency|| '6', 10) || 6, 24);
+  const timeoutMs   = Math.min(parseInt(req.query.timeoutMs  || '15000',10) || 15000, 30000);
+
+  const headers = {
+    'User-Agent': 'awertt-midi-proxy/1.0 (+https://awertt.org)',
+    'Accept': 'text/html,*/*'
   };
 
-  try {
-    const searchUrl = `https://bitmidi.com/search?q=${encodeURIComponent(q)}`;
-    const sr = await fetch(searchUrl, fetchOpts);
-    if (!sr.ok) return res.status(502).json({ error: `Search failed: ${sr.status} ${sr.statusText}` });
-    const $ = cheerio.load(await sr.text());
+  const abs = (href, base='https://bitmidi.com') => new URL(href, base).toString();
 
-    const pageLinks = new Set();
+  function controllerWithTimeout(ms) {
+    const controller = new AbortController();
+    const t = setTimeout(() => { try { controller.abort(); } catch {} }, ms);
+    return { controller, clear: () => clearTimeout(t) };
+  }
+
+  async function fetchHTML(url) {
+    const { controller, clear } = controllerWithTimeout(timeoutMs);
+    try {
+      const r = await fetch(url, { headers, redirect: 'follow', signal: controller.signal });
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+      return await r.text();
+    } finally {
+      clear();
+    }
+  }
+
+  // Extract song detail page URLs from a search results HTML page
+  function extractSongPages(html) {
+    const $ = cheerio.load(html);
+    const set = new Set();
     $('a[href]').each((_, a) => {
       const href = $(a).attr('href');
       if (href && /\/[a-z0-9-]+-mid$/i.test(href)) {
-        pageLinks.add(new URL(href, 'https://bitmidi.com').toString());
+        set.add(abs(href));
       }
     });
+    return Array.from(set);
+  }
 
-    const pages = Array.from(pageLinks).slice(0, limit);
-    const results = [];
+  async function parseSongPage(url) {
+    try {
+      const html = await fetchHTML(url);
+      const $ = cheerio.load(html);
 
-    for (const pageUrl of pages) {
-      try {
-        const pr = await fetch(pageUrl, fetchOpts);
-        if (!pr.ok) continue;
-        const $$ = cheerio.load(await pr.text());
+      const title = ($('h1').first().text() || $('title').first().text() || '').trim();
 
-        const title = ($$('h1').first().text() || $$('title').first().text() || '').trim();
-        let downloadUrl = null;
-
-        $$('a[href$=".mid"], a[href*=".mid"]').each((_, a) => {
-          const href = $$(a).attr('href');
-          if (href && /\.mid(\?.*)?$/i.test(href)) {
-            downloadUrl = new URL(href, 'https://bitmidi.com').toString();
-            return false; // break
-          }
-        });
-
-        let kb = null;
-        const bodyText = $$('body').text();
-        const m = bodyText.match(/([0-9]+(?:\.[0-9]+)?)\s*(KB|MB)\b/i);
-        if (m) {
-          const v = parseFloat(m[1]);
-          kb = /MB/i.test(m[2]) ? Math.round(v * 1024) : Math.round(v);
+      let downloadUrl = null;
+      $('a[href$=".mid"], a[href*=".mid"]').each((_, a) => {
+        const href = $(a).attr('href');
+        if (href && /\.mid(\?.*)?$/i.test(href)) {
+          downloadUrl = abs(href);
+          return false;
         }
+      });
 
-        if (downloadUrl) results.push({ title, pageUrl, downloadUrl, kb });
-      } catch (err) {
-        console.error('search page parse error:', pageUrl, err?.message || err);
+      let kb = null;
+      const bodyText = $('body').text();
+      const m = bodyText.match(/([0-9]+(?:\.[0-9]+)?)\s*(KB|MB)\b/i);
+      if (m) {
+        const v = parseFloat(m[1]);
+        kb = /MB/i.test(m[2]) ? Math.round(v * 1024) : Math.round(v);
       }
+
+      if (downloadUrl) {
+        return {
+          title,
+          url: downloadUrl,   // preferred key for Roblox client
+          downloadUrl,        // backward-compat
+          pageUrl: url,
+          kb
+        };
+      }
+    } catch (err) {
+      console.error('search song parse error:', url, err?.message || err);
+    }
+    return null;
+  }
+
+  try {
+    // Crawl paginated search pages deterministically: page=0,1,2...
+    const allSongPages = new Set();
+    let pagesVisited = 0;
+
+    for (let page = 0; page < maxPages; page++) {
+      const searchUrl = `https://bitmidi.com/search?q=${encodeURIComponent(q)}&page=${page}`;
+      let html;
+
+      try {
+        html = await fetchHTML(searchUrl);
+      } catch (e) {
+        // stop on fetch errors (network, 404, etc.)
+        if (page === 0) {
+          // Some queries show page=0 implicitly with no page param; try without &page for first request
+          try {
+            const altUrl = `https://bitmidi.com/search?q=${encodeURIComponent(q)}`;
+            html = await fetchHTML(altUrl);
+          } catch (e2) {
+            console.error('fetch search page failed:', searchUrl, e2?.message || e2);
+            break;
+          }
+        } else {
+          console.error('fetch search page failed:', searchUrl, e?.message || e);
+          break;
+        }
+      }
+
+      const songPages = extractSongPages(html);
+      pagesVisited++;
+
+      if (songPages.length === 0) {
+        // No results on this page → end of pagination
+        break;
+      }
+
+      for (const sp of songPages) {
+        if (allSongPages.size >= maxResults) break;
+        allSongPages.add(sp);
+      }
+
+      if (allSongPages.size >= maxResults) break;
     }
 
-    res.json({ query: q, count: results.length, results });
+    // Fetch all song pages (limited concurrency)
+    const songList = Array.from(allSongPages).slice(0, maxResults);
+    const out = [];
+    let cursor = 0;
+
+    async function worker() {
+      while (cursor < songList.length) {
+        const i = cursor++;
+        const item = await parseSongPage(songList[i]);
+        if (item) out.push(item);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, songList.length || 1) }, worker));
+
+    // Sort results by title for stable ordering
+    out.sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+
+    res.json({
+      query: q,
+      pagesVisited,
+      count: out.length,
+      results: out
+    });
   } catch (err) {
     console.error('bitmidi/search error:', err?.message || err);
     res.status(500).json({ error: err?.message || String(err) });
