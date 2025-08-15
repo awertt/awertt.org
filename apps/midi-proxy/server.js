@@ -1,32 +1,30 @@
+// apps/midi-proxy/server.js
+
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');           // v2.x for require()
+const fetch = require('node-fetch');           // v2.x (require-compatible)
 const cheerio = require('cheerio');
 
 // AbortController polyfill for Node 18
 let AbortController = global.AbortController;
-try {
-  if (!AbortController) AbortController = require('abort-controller');
-} catch {
-  AbortController = class { constructor(){ this.signal = undefined; } };
-}
+try { if (!AbortController) AbortController = require('abort-controller'); }
+catch { AbortController = class { constructor(){ this.signal = undefined; } }; }
 
 const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 
-// ---------- /getMidi : fetch a remote .mid and return hex ----------
+// ---------- /getMidi ----------
 app.get('/getMidi', async (req, res) => {
   const midiUrl = req.query.url;
   if (!midiUrl) return res.status(400).send("Missing 'url' parameter");
 
-  // Validate URL & scheme
+  // validate URL & scheme
   let u;
   try { u = new URL(midiUrl); } catch { return res.status(400).send("Bad 'url'"); }
   if (!/^https?:$/.test(u.protocol)) return res.status(400).send("Only http(s) URLs allowed");
 
-  // Headers (BitMidi tends to like a Referer)
   const headers = {
     'User-Agent': 'awertt-midi-proxy/1.0 (+https://awertt.org)',
     'Accept': '*/*'
@@ -37,12 +35,7 @@ app.get('/getMidi', async (req, res) => {
     const controller = new AbortController();
     const to = setTimeout(() => { try { controller.abort(); } catch {} }, 15000);
 
-    const r = await fetch(midiUrl, {
-      redirect: 'follow',
-      signal: controller.signal,
-      headers
-    });
-
+    const r = await fetch(midiUrl, { redirect: 'follow', signal: controller.signal, headers });
     clearTimeout(to);
 
     if (!r.ok) {
@@ -58,7 +51,7 @@ app.get('/getMidi', async (req, res) => {
   }
 });
 
-// ---------- /bitmidi/search : scrape BitMidi search → [{title, pageUrl, downloadUrl, kb}] ----------
+// ---------- /bitmidi/search ----------
 app.get('/bitmidi/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   const limit = Math.min(parseInt(req.query.limit || '10', 10) || 10, 25);
@@ -70,13 +63,11 @@ app.get('/bitmidi/search', async (req, res) => {
   };
 
   try {
-    // 1) Fetch search page
     const searchUrl = `https://bitmidi.com/search?q=${encodeURIComponent(q)}`;
     const sr = await fetch(searchUrl, fetchOpts);
     if (!sr.ok) return res.status(502).json({ error: `Search failed: ${sr.status} ${sr.statusText}` });
     const $ = cheerio.load(await sr.text());
 
-    // 2) Collect candidate track pages
     const pageLinks = new Set();
     $('a[href]').each((_, a) => {
       const href = $(a).attr('href');
@@ -88,7 +79,6 @@ app.get('/bitmidi/search', async (req, res) => {
     const pages = Array.from(pageLinks).slice(0, limit);
     const results = [];
 
-    // 3) Visit each page and extract direct .mid link
     for (const pageUrl of pages) {
       try {
         const pr = await fetch(pageUrl, fetchOpts);
@@ -106,7 +96,6 @@ app.get('/bitmidi/search', async (req, res) => {
           }
         });
 
-        // rough size parse (optional best-effort)
         let kb = null;
         const bodyText = $$('body').text();
         const m = bodyText.match(/([0-9]+(?:\.[0-9]+)?)\s*(KB|MB)\b/i);
@@ -115,9 +104,7 @@ app.get('/bitmidi/search', async (req, res) => {
           kb = /MB/i.test(m[2]) ? Math.round(v * 1024) : Math.round(v);
         }
 
-        if (downloadUrl) {
-          results.push({ title, pageUrl, downloadUrl, kb });
-        }
+        if (downloadUrl) results.push({ title, pageUrl, downloadUrl, kb });
       } catch (err) {
         console.error('search page parse error:', pageUrl, err?.message || err);
       }
