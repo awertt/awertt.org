@@ -214,8 +214,8 @@ app.get('/bitmidi/search', async (req, res) => {
 // ---------- health & static ----------
 app.get('/healthz', (_, res) => res.status(200).send('OK'));
 
-const PUBLIC_DIR = path.join(__dirname, 'public');
-app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
+const WEB_PUBLIC_DIR = path.join(__dirname, '../../web/public');
+app.use(express.static(WEB_PUBLIC_DIR, { extensions: ['html'] }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ awertt-app listening on :${PORT}`));
