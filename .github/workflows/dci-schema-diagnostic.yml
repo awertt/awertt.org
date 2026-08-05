@@ -1,0 +1,31 @@
+name: DCI Schema Diagnostic
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/dci-schema-diagnostic.yml
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read live SQLite schema
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          script: |
+            python3 - <<'PY'
+            import sqlite3
+            p='/var/lib/awertt-dci/dci_scores_master.sqlite'
+            con=sqlite3.connect(p)
+            for name in ('seasons','events','event_classes','corps','caption_definitions','performances','score_values','sources','coverage','data_issues'):
+                print(name, [r[1] for r in con.execute(f'PRAGMA table_info({name})')])
+            print('coverage rows', con.execute('SELECT * FROM coverage ORDER BY 1 LIMIT 2').fetchall())
+            print('season rows', con.execute('SELECT * FROM seasons ORDER BY 1 LIMIT 2').fetchall())
+            print('views', con.execute("SELECT name FROM sqlite_master WHERE type='view'").fetchall())
+            con.close()
+            PY
