@@ -1,5 +1,6 @@
 name: Expand DCI History
 
+# Rebuild trigger: verified split database builder.
 on:
   workflow_dispatch:
   push:
