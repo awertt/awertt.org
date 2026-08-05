@@ -1,6 +1,6 @@
 name: Expand DCI History
 
-# Rebuild trigger: verified split database builder.
+# Import trigger: totals-only historical fallback with explicit provenance.
 on:
   workflow_dispatch:
   push:
@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - name: Collect and deploy 2000-2014 DCI data
+      - name: Import and deploy 2000-2014 DCI totals
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
