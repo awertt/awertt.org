@@ -7,8 +7,9 @@ on:
     paths:
       - .github/workflows/dci-history-update.yml
       - apps/dci-lab/update-history.sh
-      - apps/dci-lab/append-historical-totals.py
-      - apps/dci-lab/schema-live.py
+      - apps/dci-lab/append-historical-live-v3.py
+      - apps/dci-lab/app.py
+      - apps/dci-lab/templates/**
 
 jobs:
   expand-history:
@@ -29,5 +30,4 @@ jobs:
             cd /opt/awertt-dci/repo
             git fetch --prune origin
             git reset --hard origin/main
-            python3 apps/dci-lab/schema-live.py
             bash apps/dci-lab/update-history.sh 2>&1 | tee /var/log/awertt-dci-history-update.log
