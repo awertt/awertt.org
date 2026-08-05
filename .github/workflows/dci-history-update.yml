@@ -1,12 +1,13 @@
 name: Expand DCI History
 
-# Import trigger: live-schema-compatible historical totals import.
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
     paths:
       - .github/workflows/dci-history-update.yml
+      - apps/dci-lab/update-history.sh
+      - apps/dci-lab/append-historical-totals.py
 
 jobs:
   expand-history:
