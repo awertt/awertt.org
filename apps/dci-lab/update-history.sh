@@ -52,6 +52,10 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
+def table_exists(con, table):
+    return con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
+
+
 def columns(con, table):
     return [row[1] for row in con.execute(f"PRAGMA table_info({table})")]
 
@@ -68,18 +72,25 @@ def remove_previous_import(con):
                 pmarks = ",".join("?" for _ in perf_ids)
                 con.execute(f"DELETE FROM score_values WHERE performance_id IN ({pmarks})", perf_ids)
                 con.execute(f"DELETE FROM performances WHERE performance_id IN ({pmarks})", perf_ids)
-            con.execute(f"DELETE FROM scheduled_appearances WHERE event_class_id IN ({cmarks})", class_ids)
-            con.execute(f"DELETE FROM judge_assignments WHERE event_class_id IN ({cmarks})", class_ids)
+            for table in ("scheduled_appearances", "judge_assignments"):
+                if table_exists(con, table):
+                    con.execute(f"DELETE FROM {table} WHERE event_class_id IN ({cmarks})", class_ids)
             con.execute(f"DELETE FROM event_classes WHERE event_class_id IN ({cmarks})", class_ids)
-        con.execute(f"DELETE FROM event_interruptions WHERE event_id IN ({marks})", event_ids)
-        con.execute(f"DELETE FROM sources WHERE event_id IN ({marks})", event_ids)
+        if table_exists(con, "event_interruptions"):
+            con.execute(f"DELETE FROM event_interruptions WHERE event_id IN ({marks})", event_ids)
+        if table_exists(con, "sources"):
+            con.execute(f"DELETE FROM sources WHERE event_id IN ({marks})", event_ids)
         con.execute(f"DELETE FROM events WHERE event_id IN ({marks})", event_ids)
 
     coverage_cols = set(columns(con, "coverage"))
     coverage_year = "season_id" if "season_id" in coverage_cols else "season_year"
     con.execute(f"DELETE FROM coverage WHERE {coverage_year} BETWEEN 2000 AND 2014")
-    con.execute("DELETE FROM data_issues WHERE season_year BETWEEN 2000 AND 2014 AND issue_type LIKE 'historical_%'")
-    con.execute("DELETE FROM seasons WHERE year BETWEEN 2000 AND 2014")
+    if table_exists(con, "data_issues"):
+        con.execute("DELETE FROM data_issues WHERE season_year BETWEEN 2000 AND 2014 AND issue_type LIKE 'historical_%'")
+    if table_exists(con, "seasons"):
+        season_cols = set(columns(con, "seasons"))
+        season_year_col = "year" if "year" in season_cols else "season_year"
+        con.execute(f"DELETE FROM seasons WHERE {season_year_col} BETWEEN 2000 AND 2014")
 
 
 def refresh_coverage(con, year, stats):
@@ -125,16 +136,17 @@ def refresh_coverage(con, year, stats):
     sql = f"INSERT OR REPLACE INTO coverage ({','.join(insert_cols)}) VALUES ({','.join('?' for _ in insert_cols)})"
     con.execute(sql, [values[name] for name in insert_cols])
 
-    con.execute(
-        """INSERT INTO data_issues(season_year,event_id,performance_id,severity,issue_type,
-           description,source_url,resolved) VALUES(?,NULL,NULL,'info','historical_totals_only',?,?,0)""",
-        (year, "Historical season contains total scores and placements only. Detailed recap values and judges were not available and were not fabricated.", module.RAW_TEMPLATE.format(year=year)),
-    )
-    con.execute(
-        """INSERT INTO data_issues(season_year,event_id,performance_id,severity,issue_type,
-           description,source_url,resolved) VALUES(?,NULL,NULL,'warning','historical_classification_limit',?,?,0)""",
-        (year, "Historical source documentation notes rolling corrections to circuit/class designations. Explicit DCA/all-age records were excluded; remaining junior corps were normalized using source labels and known move-up years.", module.SOURCE_REPO),
-    )
+    if table_exists(con, "data_issues"):
+        con.execute(
+            """INSERT INTO data_issues(season_year,event_id,performance_id,severity,issue_type,
+               description,source_url,resolved) VALUES(?,NULL,NULL,'info','historical_totals_only',?,?,0)""",
+            (year, "Historical season contains total scores and placements only. Detailed recap values and judges were not available and were not fabricated.", module.RAW_TEMPLATE.format(year=year)),
+        )
+        con.execute(
+            """INSERT INTO data_issues(season_year,event_id,performance_id,severity,issue_type,
+               description,source_url,resolved) VALUES(?,NULL,NULL,'warning','historical_classification_limit',?,?,0)""",
+            (year, "Historical source documentation notes rolling corrections to circuit/class designations. Explicit DCA/all-age records were excluded; remaining junior corps were normalized using source labels and known move-up years.", module.SOURCE_REPO),
+        )
 
 
 module.remove_previous_import = remove_previous_import
