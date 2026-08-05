@@ -8,6 +8,7 @@ on:
       - .github/workflows/dci-history-update.yml
       - apps/dci-lab/update-history.sh
       - apps/dci-lab/append-historical-totals.py
+      - apps/dci-lab/schema-live.py
 
 jobs:
   expand-history:
@@ -28,12 +29,5 @@ jobs:
             cd /opt/awertt-dci/repo
             git fetch --prune origin
             git reset --hard origin/main
-            python3 - <<'PY'
-            import sqlite3
-            p='/var/lib/awertt-dci/dci_scores_master.sqlite'
-            con=sqlite3.connect(p)
-            for name in ('seasons','events','event_classes','corps','caption_definitions','performances','score_values','sources','coverage','data_issues'):
-                print('SCHEMA', name, [r[1] for r in con.execute(f'PRAGMA table_info({name})')], flush=True)
-            con.close()
-            PY
+            python3 apps/dci-lab/schema-live.py
             bash apps/dci-lab/update-history.sh 2>&1 | tee /var/log/awertt-dci-history-update.log
