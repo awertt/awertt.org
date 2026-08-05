@@ -1,0 +1,28 @@
+name: Expand DCI History
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/dci-history-update.yml
+
+jobs:
+  expand-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Collect and deploy 2000-2014 DCI data
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 3h
+          script_stop: true
+          script: |
+            set -Eeuo pipefail
+            cd /opt/awertt-dci/repo
+            git fetch --prune origin
+            git reset --hard origin/main
+            bash apps/dci-lab/update-history.sh 2>&1 | tee /var/log/awertt-dci-history-update.log
