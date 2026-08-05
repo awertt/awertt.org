@@ -1,0 +1,31 @@
+name: Verify DCI Data Lab
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/dci-postdeploy-verify.yml
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify database and public routes
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          timeout: 120s
+          command_timeout: 10m
+          script_stop: true
+          script: |
+            set -Eeuo pipefail
+            curl -fsS http://127.0.0.1:3001/health
+            curl -fsS http://127.0.0.1:3001/records | grep -q 'Exact ties'
+            curl -fsS 'http://127.0.0.1:3001/?year=2000' | grep -q '2000 DCI'
+            curl -fsS http://127.0.0.1:3001/corps/Colts | grep -q 'Ties'
+            python3 -c "import sqlite3; c=sqlite3.connect('/var/lib/awertt-dci/dci_scores_master.sqlite'); print('YEARS',c.execute('select min(season_year),max(season_year),count(distinct season_year) from v_performance_summary').fetchone()); print('HISTORICAL',c.execute('select count(*),sum(placement_tied) from v_performance_summary where season_year between 2000 and 2014').fetchone()); print('EXACT_TIE_GROUPS',c.execute('select count(*) from (select event_id,division_name,total_score from v_performance_summary where performed=1 group by event_id,division_name,total_score having count(*)>1)').fetchone()[0]); print('COLTS_2000_2014',c.execute(\"select count(*),min(event_date),max(event_date),max(total_score) from v_performance_summary where corps_name='Colts' and season_year between 2000 and 2014\").fetchone()); c.close()"
+            curl -fsS https://awertt.org/dci/records | grep -q 'Exact ties'
+            curl -fsS 'https://awertt.org/dci/?year=2000' | grep -q '2000 DCI'
+            echo VERIFIED
