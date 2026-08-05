@@ -14,6 +14,8 @@ NEW_DB="$DATA_DIR/dci_scores_master.sqlite.new"
 HISTORY_RAW=/var/www/html/dci-raw-2000-2014.zip
 FULL_RAW=/var/www/html/dci-raw-2000-2026.zip
 BUILDER="$APP_DIR/build-full-database.py"
+BUILDER_B64=/tmp/awertt-dci-builder.b64
+BUILDER_GZ=/tmp/awertt-dci-builder.py.gz
 
 mkdir -p "$DATA_DIR"
 
@@ -29,7 +31,12 @@ git -C "$REPO_DIR" reset --hard origin/main
 # Put the tie-aware pages live immediately while the historical collection runs.
 systemctl restart awertt-dci.service
 
-base64 -d "$APP_DIR/build-full-database.py.gz.b64" | gzip -d > "$BUILDER"
+rm -f "$BUILDER_B64" "$BUILDER_GZ" "$BUILDER"
+cat "$APP_DIR"/builder-parts/part*.txt > "$BUILDER_B64"
+base64 -d "$BUILDER_B64" > "$BUILDER_GZ"
+gzip -t "$BUILDER_GZ"
+gzip -dc "$BUILDER_GZ" > "$BUILDER"
+python3 -m py_compile "$BUILDER"
 chmod 700 "$BUILDER" "$APP_DIR/collect-history.py" "$APP_DIR/merge-raw-archives.py"
 
 CURRENT_RAW="$(python3 - <<'PY'
