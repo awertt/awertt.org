@@ -1,6 +1,6 @@
 name: Expand DCI History
 
-# Import trigger: totals-only historical fallback with explicit provenance.
+# Import trigger: live-schema-compatible historical totals import.
 on:
   workflow_dispatch:
   push:
