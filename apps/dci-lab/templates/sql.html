@@ -1,0 +1,5 @@
+{% extends 'base.html' %}{% block title %}DCI SQL Console{% endblock %}{% block content %}
+<section class="hero"><div class="kicker">Protected admin tool</div><h1>Read-only SQL</h1><p class="muted">Only a single SELECT or WITH query is accepted. Results are capped at 1,000 rows.</p></section>
+<form method="post"><textarea name="sql">{{ sql }}</textarea><p><button>Run SQL</button></p></form>{% if error %}<div class="error">{{ error }}</div>{% endif %}
+{% if result %}<section class="panel"><h2>{{ result|length }} row{{ '' if result|length==1 else 's' }}</h2><div class="table-wrap"><table><thead><tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead><tbody>{% for r in result %}<tr>{% for c in columns %}<td>{{ r[c] }}</td>{% endfor %}</tr>{% endfor %}</tbody></table></div></section>{% endif %}
+{% endblock %}
