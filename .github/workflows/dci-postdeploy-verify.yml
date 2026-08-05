@@ -1,6 +1,7 @@
 name: Verify DCI Data Lab
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
     paths:
@@ -21,11 +22,24 @@ jobs:
           script_stop: true
           script: |
             set -Eeuo pipefail
-            curl -fsS http://127.0.0.1:3001/health
-            curl -fsS http://127.0.0.1:3001/records | grep -q 'Exact ties'
-            curl -fsS 'http://127.0.0.1:3001/?year=2000' | grep -q '2000 DCI'
-            curl -fsS http://127.0.0.1:3001/corps/Colts | grep -q 'Ties'
+            for attempt in $(seq 1 40); do
+              if curl -fsS http://127.0.0.1:3001/health -o /tmp/dci-health.json \
+                && grep -q '"earliest_year":2000' /tmp/dci-health.json \
+                && curl -fsS 'http://127.0.0.1:3001/?year=2000' -o /tmp/dci-2000.html \
+                && grep -q 'Historical coverage note' /tmp/dci-2000.html; then
+                break
+              fi
+              sleep 3
+            done
+            cat /tmp/dci-health.json
+            curl -fsS http://127.0.0.1:3001/records -o /tmp/dci-records.html
+            curl -fsS http://127.0.0.1:3001/corps/Colts -o /tmp/dci-colts.html
+            grep -q 'Exact ties' /tmp/dci-records.html
+            grep -q 'Closest non-tied adjacent spreads' /tmp/dci-records.html
+            grep -q 'Coverage note' /tmp/dci-colts.html
             python3 -c "import sqlite3; c=sqlite3.connect('/var/lib/awertt-dci/dci_scores_master.sqlite'); print('YEARS',c.execute('select min(season_year),max(season_year),count(distinct season_year) from v_performance_summary').fetchone()); print('HISTORICAL',c.execute('select count(*),sum(placement_tied) from v_performance_summary where season_year between 2000 and 2014').fetchone()); print('EXACT_TIE_GROUPS',c.execute('select count(*) from (select event_id,division_name,total_score from v_performance_summary where performed=1 group by event_id,division_name,total_score having count(*)>1)').fetchone()[0]); print('COLTS_2000_2014',c.execute(\"select count(*),min(event_date),max(event_date),max(total_score) from v_performance_summary where corps_name='Colts' and season_year between 2000 and 2014\").fetchone()); c.close()"
-            curl -fsS https://awertt.org/dci/records | grep -q 'Exact ties'
-            curl -fsS 'https://awertt.org/dci/?year=2000' | grep -q '2000 DCI'
+            curl -fsS https://awertt.org/dci/records -o /tmp/dci-public-records.html
+            curl -fsS 'https://awertt.org/dci/?year=2000' -o /tmp/dci-public-2000.html
+            grep -q 'Exact ties' /tmp/dci-public-records.html
+            grep -q '2000 DCI' /tmp/dci-public-2000.html
             echo VERIFIED
