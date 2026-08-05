@@ -80,7 +80,8 @@ def dashboard():
           FROM v_performance_summary
           WHERE season_year=? AND performed=1 AND total_score IS NOT NULL
         )
-        SELECT corps_name,event_date,event_name,total_score,placement,placement_tied
+        SELECT corps_name,event_date,event_name,total_score,placement,placement_tied,
+               DENSE_RANK() OVER (ORDER BY total_score DESC) display_rank
         FROM ranked WHERE rn=1 ORDER BY total_score DESC,corps_name
     """, (year,))
     stats = {
