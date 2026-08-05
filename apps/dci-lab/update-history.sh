@@ -11,6 +11,7 @@ APP_DIR="$REPO_DIR/apps/dci-lab"
 DATA_DIR=/var/lib/awertt-dci
 DB_FILE="$DATA_DIR/dci_scores_master.sqlite"
 NEW_DB="$DATA_DIR/dci_scores_master.sqlite.new"
+IMPORTER="$APP_DIR/append-historical-live-v3.py"
 
 mkdir -p "$DATA_DIR"
 
@@ -30,8 +31,8 @@ git -C "$REPO_DIR" reset --hard origin/main
 # Deploy the tie-aware application before rebuilding the database.
 systemctl restart awertt-dci.service
 
-python3 -m py_compile "$APP_DIR/append-historical-live.py"
-chmod 700 "$APP_DIR/append-historical-live.py"
+python3 -m py_compile "$IMPORTER"
+chmod 700 "$IMPORTER"
 
 rm -f "$NEW_DB"
 cp -a "$DB_FILE" "$NEW_DB"
@@ -39,7 +40,7 @@ chown root:root "$NEW_DB"
 chmod 600 "$NEW_DB"
 
 echo "Importing 2000-2014 total-score and placement history..."
-python3 "$APP_DIR/append-historical-live.py" "$NEW_DB"
+python3 "$IMPORTER" "$NEW_DB"
 
 python3 - "$NEW_DB" <<'PY'
 import sqlite3,sys
@@ -57,7 +58,7 @@ if check!='ok' or years!=required or historical<=0 or notes!=15:
 print(f'Final validation: integrity={check}; historical appearances={historical}; historical tied appearances={historical_ties}; seasons={len(years)}')
 PY
 
-BACKUP="$DATA_DIR/dci_scores_master.sqlite.pre-2000-expansion.$(date +%Y%m%d-%H%M%S)"
+BACKUP="$DATA_DIR/dci_scores_master.sqlite.pre-history-reclass.$(date +%Y%m%d-%H%M%S)"
 cp -a "$DB_FILE" "$BACKUP"
 echo "Previous database backed up to $BACKUP"
 
