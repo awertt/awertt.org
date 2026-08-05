@@ -41,7 +41,8 @@ python3 -m venv "$APP_ROOT/venv"
 
 if [[ ! -s "$DB_FILE" ]]; then
   echo "Downloading the DCI SQLite database from Google Drive..."
-  "$APP_ROOT/venv/bin/gdown" --id "$DB_DRIVE_ID" --output "$DB_FILE"
+  rm -f "$DB_FILE"
+  "$APP_ROOT/venv/bin/gdown" "$DB_DRIVE_ID" -O "$DB_FILE"
 fi
 
 python3 - "$DB_FILE" <<'PY'
